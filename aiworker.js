@@ -1,7 +1,6 @@
 // ============================================================
 // AI Nav — 基于 Cloudflare Workers 的 AI 工具导航站（多语言版）
 // ============================================================
-
 const CATEGORIES = [
   { id: "chat",    name: "聊天对话", name_en: "Chat", icon: "🤖" },
   { id: "image",   name: "图像生成", name_en: "Image Gen", icon: "🎨" },
@@ -10,8 +9,8 @@ const CATEGORIES = [
   { id: "audio",   name: "音频音乐", name_en: "Audio", icon: "🎵" },
   { id: "writing", name: "写作办公", name_en: "Writing", icon: "✍️" },
   { id: "open",    name: "开源社区", name_en: "Open Source", icon: "🔧" },
+  { id: "news",    name: "国外新闻", name_en: "Foreign News", icon: "📰" },
 ];
-
 const TOOLS = [
   { name: "ChatGPT", name_en: "ChatGPT", url: "https://chatgpt.com", cat: "chat", desc: "OpenAI 旗舰对话 AI，支持多模态理解与生成", desc_en: "OpenAI's flagship multimodal conversational AI.", tags: ["GPT", "OpenAI"], tags_en: ["GPT", "OpenAI"] },
   { name: "Claude", name_en: "Claude", url: "https://claude.ai", cat: "chat", desc: "Anthropic 大模型，长文本、推理与编码俱佳", desc_en: "Anthropic's large model, great for long text and coding.", tags: ["Anthropic", "长文本"], tags_en: ["Anthropic", "Long Context"] },
@@ -49,8 +48,14 @@ const TOOLS = [
   { name: "Hugging Face", name_en: "Hugging Face", url: "https://huggingface.co", cat: "open", desc: "全球最大的 AI 模型与数据集社区", desc_en: "World's largest AI model community.", tags: ["模型", "数据集"], tags_en: ["Models", "Datasets"] },
   { name: "Ollama", name_en: "Ollama", url: "https://ollama.com", cat: "open", desc: "一条命令在本地运行开源大模型", desc_en: "Run open-source LLMs locally.", tags: ["本地部署", "开源"], tags_en: ["Local", "Open Source"] },
   { name: "LangChain", name_en: "LangChain", url: "https://www.langchain.com", cat: "open", desc: "LLM 应用开发框架，快速构建 AI Agent", desc_en: "Framework for building AI Agents.", tags: ["框架", "Agent"], tags_en: ["Framework", "Agent"] },
+  // ---------- 新增国外新闻工具 ----------
+  { name: "美国之音", name_en: "VOA", url: "https://www.voachinese.com", cat: "news", desc: "美国之音中文网，提供实时新闻、分析与评论", desc_en: "VOA Chinese service with real-time news and analysis.", tags: ["美国之音", "新闻"], tags_en: ["VOA", "News"] },
+  { name: "德国之音", name_en: "Deutsche Welle", url: "https://www.dw.com/zh", cat: "news", desc: "德国之音中文网，客观报道国际时事与深度分析", desc_en: "DW Chinese website with objective international news.", tags: ["德国之音", "新闻"], tags_en: ["DW", "News"] },
+  { name: "BBC中文网", name_en: "BBC Chinese", url: "https://www.bbc.com/zhongwen", cat: "news", desc: "BBC 中文网，全球新闻权威来源，报道国际热点", desc_en: "BBC Chinese service delivering global news authority.", tags: ["BBC", "新闻"], tags_en: ["BBC", "News"] },
+  { name: "纽约时报", name_en: "NY Times", url: "https://www.nytimes.com", cat: "news", desc: "纽约时报中文网，提供深度报道、国际新闻与评论", desc_en: "NY Times Chinese site with in-depth reports.", tags: ["纽约时报", "新闻"], tags_en: ["NYTimes", "News"] },
+  { name: "华尔街日报", name_en: "Wall Street Journal", url: "https://www.wsj.com", cat: "news", desc: "华尔街日报中文网，专注经济、金融与商业新闻", desc_en: "WSJ Chinese edition focused on business and finance.", tags: ["华尔街日报", "新闻"], tags_en: ["WSJ", "News"] },
+  { name: "路透社中文网", name_en: "Reuters Chinese", url: "https://www.reuters.com/china", cat: "news", desc: "路透社中文网，提供全球财经与政治新闻报道", desc_en: "Reuters Chinese website covering global finance & politics.", tags: ["路透社", "新闻"], tags_en: ["Reuters", "News"] },
 ];
-
 const I18N = {
   zh: {
     title: "AI Nav · AI 工具导航",
@@ -75,38 +80,31 @@ const I18N = {
     footer: "Powered by ⚡ Cloudflare Workers"
   }
 };
-
 // ---------- Worker 入口 ----------
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-
     if (url.pathname === "/api/track" && request.method === "POST") {
       let name = "";
       try { name = String(((await request.json()) || {}).name || "").slice(0, 50); } catch (e) {}
       if (env.DB) ctx.waitUntil(insertEvent(env, request, "click", name));
       return new Response(null, { status: 204 });
     }
-
     if (url.pathname === "/stats") {
       if (env.STATS_TOKEN && url.searchParams.get("token") !== env.STATS_TOKEN) return new Response("Not Found", { status: 404 });
       if (env.DB) return handleStats(env);
       return new Response("D1 DB not configured", { status: 500 });
     }
-
     if (url.pathname === "/api/tools") {
       return Response.json({ categories: CATEGORIES, tools: TOOLS }, { headers: { "Cache-Control": "public, max-age=300" } });
     }
-
     if (env.DB) ctx.waitUntil(insertEvent(env, request, "view", ""));
     const stats = env.DB ? await getStats(env) : null;
-
     return new Response(renderHTML(stats), {
       headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=600" },
     });
   },
 };
-
 // ---------- 统计核心逻辑 ----------
 function dayStr(ts) { return new Date(ts).toISOString().slice(0, 10); }
 function hashIP(ip, day) {
@@ -121,7 +119,6 @@ function insertEvent(env, request, type, name) {
   return env.DB.prepare("INSERT INTO events (type, name, day, ts, ref, country, iphash) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
     .bind(type, name, day, now, (request.headers.get("referer") || "").slice(0, 200), (request.cf && request.cf.country) || "", hashIP(request.headers.get("cf-connecting-ip"), day)).run();
 }
-
 let statsCache = { ts: 0, value: null };
 async function getStats(env) {
   const now = Date.now();
@@ -139,7 +136,6 @@ async function getStats(env) {
   } catch (e) { return statsCache.value; }
   return statsCache.value;
 }
-
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 async function handleStats(env) {
   const now = Date.now();
@@ -157,12 +153,10 @@ function renderStatsPage(dailyRows, topRows, todayPV) {
   const topHTML = topRows.length ? topRows.map(r => `<div class="row"><span class="label">${esc(r.name)}</span><div class="bar"><i style="width:${Math.round((r.c/maxC)*100)}%"></i></div><span class="num">${r.c} 次</span></div>`).join("") : '<div class="muted">暂无</div>';
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>统计</title><style>body{margin:0;font-family:system-ui;color:#eef0f8;background:linear-gradient(160deg,#0b1020,#170f2e 50%,#06202a);min-height:100vh}.wrap{max-width:760px;margin:0 auto;padding:40px 20px}.card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:18px;backdrop-filter:blur(18px);padding:20px;margin-top:20px}.big{font-size:32px;font-weight:800;background:linear-gradient(90deg,#6366f1,#a855f7);-webkit-background-clip:text;color:transparent}.row{display:flex;align-items:center;gap:10px;margin:8px 0;font-size:13px}.label{width:90px;overflow:hidden;text-overflow:ellipsis}.bar{flex:1;height:8px;border-radius:999px;background:rgba(255,255,255,.08)}.bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#6366f1,#a855f7)}.num{width:110px;text-align:right;color:#9aa1b5}</style></head><body><div class="wrap"><h1>📊 访问统计</h1><div class="card"><h2>最近 24 小时</h2><div class="big">${todayPV}</div></div><div class="card"><h2>最近 7 天</h2>${dailyHTML}</div><div class="card"><h2>点击榜 Top 10</h2>${topHTML}</div></div></body></html>`;
 }
-
 // ---------- 页面渲染 ----------
 function renderHTML(stats) {
   const data = JSON.stringify({ categories: CATEGORIES, tools: TOOLS, stats: stats || null }).replace(/</g, "\\u003c");
   const i18nData = JSON.stringify(I18N).replace(/</g, "\\u003c");
-
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -247,7 +241,6 @@ function renderHTML(stats) {
     </div>
   </div>
 </header>
-
 <section class="hero">
   <h1><span id="hero1"></span> <span class="grad" id="hero2"></span></h1>
   <p id="count" class="sub"></p>
@@ -257,18 +250,14 @@ function renderHTML(stats) {
   </div>
   <div class="stats" id="stats"></div>
 </section>
-
 <main class="wrap">
   <nav id="cats" class="cats"></nav>
   <div id="grid" class="grid"></div>
 </main>
-
 <footer id="footer-text"></footer>
-
 <script>
 var DATA = ${data};
 var I18N = ${i18nData};
-
 (function () {
   function main() {
     var lang = localStorage.getItem("lang") || "zh";
@@ -282,13 +271,11 @@ var I18N = ${i18nData};
     var hero1 = document.getElementById("hero1");
     var hero2 = document.getElementById("hero2");
     var footerText = document.getElementById("footer-text");
-
     function t(key) { return I18N[lang][key] || I18N.zh[key] || key; }
     function getText(obj, field) {
       if (lang === "en" && obj[field + "_en"]) return obj[field + "_en"];
       return obj[field];
     }
-
     function applyTexts() {
       hero1.textContent = t("heroTitle1");
       hero2.textContent = t("heroTitle2");
@@ -297,7 +284,6 @@ var I18N = ${i18nData};
       langBtn.textContent = lang === "zh" ? "En" : "中";
       document.title = t("title");
     }
-
     function renderStats() {
       var el = document.getElementById("stats");
       var s = DATA.stats;
@@ -308,7 +294,6 @@ var I18N = ${i18nData};
         '<div class="stat"><span class="stat-icon">📈</span><b>' + s.totalPV + "</b><span>" + t("statsTotal") + "</span></div>" +
         '<div class="stat"><span class="stat-icon">🔥</span><b>' + s.totalClicks + "</b><span>" + t("statsClicks") + "</span></div>";
     }
-
     function renderCats() {
       var items = [{ id: "all", name: t("all"), name_en: t("all"), icon: "✨" }].concat(DATA.categories);
       var html = "";
@@ -318,7 +303,6 @@ var I18N = ${i18nData};
       }
       catsEl.innerHTML = html;
     }
-
     function renderGrid() {
       var q = state.q.trim().toLowerCase();
       var list = DATA.tools.filter(function (tool) {
@@ -326,16 +310,13 @@ var I18N = ${i18nData};
         var hay = (getText(tool, "name") + " " + tool.name + " " + getText(tool, "desc") + " " + tool.desc + " " + (tool.tags||[]).join(" ") + " " + (tool.tags_en||[]).join(" ")).toLowerCase();
         return okCat && (!q || hay.indexOf(q) > -1);
       });
-
       var totalStr = t("totalCount").replace("{total}", DATA.tools.length);
       var filteredStr = list.length !== DATA.tools.length ? t("filteredCount").replace("{count}", list.length) : "";
       countEl.textContent = totalStr + filteredStr;
-
       if (!list.length) {
         grid.innerHTML = '<div class="empty">' + t("empty") + '</div>';
         return;
       }
-
       var html = "";
       for (var i = 0; i < list.length; i++) {
         var tool = list[i];
@@ -350,7 +331,6 @@ var I18N = ${i18nData};
       }
       grid.innerHTML = html;
     }
-
     catsEl.addEventListener("click", function (e) {
       var btn = e.target.closest("button");
       if (!btn) return;
@@ -358,12 +338,10 @@ var I18N = ${i18nData};
       renderCats();
       renderGrid();
     });
-
     searchEl.addEventListener("input", function () {
       state.q = searchEl.value;
       renderGrid();
     });
-
     grid.addEventListener("click", function (e) {
       var a = e.target.closest("a.card");
       if (!a) return;
@@ -374,7 +352,6 @@ var I18N = ${i18nData};
         ));
       } catch (err) {}
     });
-
     var dark = document.documentElement.getAttribute("data-theme") === "dark";
     function applyTheme() {
       document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
@@ -385,7 +362,6 @@ var I18N = ${i18nData};
       localStorage.setItem("theme", dark ? "dark" : "light");
       applyTheme();
     });
-
     langBtn.addEventListener("click", function () {
       lang = lang === "zh" ? "en" : "zh";
       localStorage.setItem("lang", lang);
@@ -394,14 +370,12 @@ var I18N = ${i18nData};
       renderGrid();
       renderStats();
     });
-
     applyTheme();
     applyTexts();
     renderStats();
     renderCats();
     renderGrid();
   }
-
   try { main(); } catch (err) {
     document.getElementById("grid").innerHTML = '<div class="empty">⚠️ Error: ' + (err && err.message ? err.message : err) + "</div>";
   }
@@ -409,4 +383,4 @@ var I18N = ${i18nData};
 </script>
 </body>
 </html>`;
-}
+} 
